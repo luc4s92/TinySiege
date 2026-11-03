@@ -25,6 +25,11 @@ namespace TinySiege.EditorTools
 
         const string k_PreviewPrefabPath = "Assets/_Project/Prefabs/PlacementPreview.prefab";
         const string k_PreviewMaterialPath = "Assets/_Project/Materials/PlacementPreview.mat";
+        const string k_ShadowCatcherMaterialPath = "Assets/_Project/Materials/ShadowCatcher.mat";
+
+        // Shadow receiver: slightly larger than the board so shadows cast past its edges land on the table.
+        const float k_ShadowReceiverScale = 1.4f;
+        const float k_ShadowReceiverLift = 0.001f;
 
         // Table-top footprint in meters. X = width, Z = depth (+Z points away from the player).
         // The placement preview is generated from the same footprint so both always match.
@@ -44,9 +49,11 @@ namespace TinySiege.EditorTools
             var kenneyMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_KenneyMaterialPath);
             var boardMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_BoardMaterialPath);
             var previewMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_PreviewMaterialPath);
-            if (towerModel == null || wallModel == null || kenneyMaterial == null || boardMaterial == null || previewMaterial == null)
+            var shadowCatcherMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_ShadowCatcherMaterialPath);
+            if (towerModel == null || wallModel == null || kenneyMaterial == null || boardMaterial == null ||
+                previewMaterial == null || shadowCatcherMaterial == null)
             {
-                Debug.LogError("PlacedBoardBuilder: missing Kenney models or board/preview materials; nothing was built.");
+                Debug.LogError("PlacedBoardBuilder: missing Kenney models or board/preview/shadow materials; nothing was built.");
                 return;
             }
 
@@ -54,7 +61,7 @@ namespace TinySiege.EditorTools
             GameObject prefab;
             try
             {
-                prefab = BuildPrefab(root, towerModel, wallModel, kenneyMaterial, boardMaterial);
+                prefab = BuildPrefab(root, towerModel, wallModel, kenneyMaterial, boardMaterial, shadowCatcherMaterial);
             }
             finally
             {
@@ -108,7 +115,7 @@ namespace TinySiege.EditorTools
         }
 
         static GameObject BuildPrefab(GameObject root, GameObject towerModel, GameObject wallModel,
-            Material kenneyMaterial, Material boardMaterial)
+            Material kenneyMaterial, Material boardMaterial, Material shadowCatcherMaterial)
         {
             float top = k_BoardSize.y;
             var board = root.AddComponent<PlacedBoard>();
@@ -121,7 +128,8 @@ namespace TinySiege.EditorTools
             baseVisual.transform.SetParent(boardRoot, false);
             baseVisual.transform.localPosition = new Vector3(0f, top * 0.5f, 0f);
             baseVisual.transform.localScale = k_BoardSize;
-            ConfigureRenderers(baseVisual, boardMaterial, ShadowCastingMode.Off);
+            // Casts so the board leaves a contact shadow on the real table through the shadow receiver.
+            ConfigureRenderers(baseVisual, boardMaterial, ShadowCastingMode.On);
 
             // Gameplay collision: a single box, top flush with the board surface, independent from visuals.
             var physicsSurface = CreateChild(root.transform, "PhysicsSurface", Vector3.zero);
@@ -149,6 +157,17 @@ namespace TinySiege.EditorTools
             var catapultSocket = CreateChild(root.transform, "CatapultSocket", new Vector3(0f, top, k_BoardSize.z * k_CatapultDepthRatio));
             var targetsRoot = CreateChild(root.transform, "TargetsRoot", new Vector3(0f, top, k_BoardSize.z * k_FortressDepthRatio));
             var shadowReceiverSocket = CreateChild(root.transform, "ShadowReceiverSocket", Vector3.zero);
+
+            // Shadow receiver: an upward-facing quad on the table plane, rendered only where shadows fall.
+            // Under the board it is hidden by the board's depth; around it, it darkens the camera image.
+            var receiver = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            receiver.name = "ShadowReceiver";
+            Object.DestroyImmediate(receiver.GetComponent<Collider>());
+            receiver.transform.SetParent(shadowReceiverSocket, false);
+            receiver.transform.localPosition = new Vector3(0f, k_ShadowReceiverLift, 0f);
+            receiver.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            receiver.transform.localScale = new Vector3(k_BoardSize.x * k_ShadowReceiverScale, k_BoardSize.z * k_ShadowReceiverScale, 1f);
+            ConfigureRenderers(receiver, shadowCatcherMaterial, ShadowCastingMode.Off);
 
             var serialized = new SerializedObject(board);
             serialized.FindProperty("boardRoot").objectReferenceValue = boardRoot;
