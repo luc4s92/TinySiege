@@ -26,6 +26,13 @@ namespace TinySiege.EditorTools
         const string k_PreviewPrefabPath = "Assets/_Project/Prefabs/PlacementPreview.prefab";
         const string k_PreviewMaterialPath = "Assets/_Project/Materials/PlacementPreview.mat";
         const string k_ShadowCatcherMaterialPath = "Assets/_Project/Materials/ShadowCatcher.mat";
+        const string k_TargetMaterialPath = "Assets/_Project/Materials/TargetMarker.mat";
+
+        // Destructible weak points in front of the fortress, as fractions of the board width.
+        static readonly float[] k_TargetXRatios = { -0.3f, -0.1f, 0.1f, 0.3f };
+        const float k_TargetSize = 0.04f;
+        const float k_TargetFrontGap = 0.005f;
+        const float k_TargetHitboxRatio = 0.75f;
 
         // Shadow receiver: slightly larger than the board so shadows cast past its edges land on the table.
         const float k_ShadowReceiverScale = 1.4f;
@@ -50,8 +57,9 @@ namespace TinySiege.EditorTools
             var boardMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_BoardMaterialPath);
             var previewMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_PreviewMaterialPath);
             var shadowCatcherMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_ShadowCatcherMaterialPath);
+            var targetMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_TargetMaterialPath);
             if (towerModel == null || wallModel == null || kenneyMaterial == null || boardMaterial == null ||
-                previewMaterial == null || shadowCatcherMaterial == null)
+                previewMaterial == null || shadowCatcherMaterial == null || targetMaterial == null)
             {
                 Debug.LogError("PlacedBoardBuilder: missing Kenney models or board/preview/shadow materials; nothing was built.");
                 return;
@@ -61,7 +69,7 @@ namespace TinySiege.EditorTools
             GameObject prefab;
             try
             {
-                prefab = BuildPrefab(root, towerModel, wallModel, kenneyMaterial, boardMaterial, shadowCatcherMaterial);
+                prefab = BuildPrefab(root, towerModel, wallModel, kenneyMaterial, boardMaterial, shadowCatcherMaterial, targetMaterial);
             }
             finally
             {
@@ -115,7 +123,7 @@ namespace TinySiege.EditorTools
         }
 
         static GameObject BuildPrefab(GameObject root, GameObject towerModel, GameObject wallModel,
-            Material kenneyMaterial, Material boardMaterial, Material shadowCatcherMaterial)
+            Material kenneyMaterial, Material boardMaterial, Material shadowCatcherMaterial, Material targetMaterial)
         {
             float top = k_BoardSize.y;
             var board = root.AddComponent<PlacedBoard>();
@@ -156,6 +164,24 @@ namespace TinySiege.EditorTools
             // Integration points only; no systems yet.
             var catapultSocket = CreateChild(root.transform, "CatapultSocket", new Vector3(0f, top, k_BoardSize.z * k_CatapultDepthRatio));
             var targetsRoot = CreateChild(root.transform, "TargetsRoot", new Vector3(0f, top, k_BoardSize.z * k_FortressDepthRatio));
+
+            // Targets stand on the board just in front of the fortress (towards the catapult, -Z).
+            float wallDepth = rotateWall ? wallBounds.size.x : wallBounds.size.z;
+            float fortressFrontZ = -0.5f * Mathf.Max(towerBounds.size.z, wallDepth) * scale;
+            float targetZ = fortressFrontZ - k_TargetFrontGap - k_TargetSize * 0.5f;
+            for (int i = 0; i < k_TargetXRatios.Length; i++)
+            {
+                var target = GameObject.CreatePrimitive(PrimitiveType.Cube); // keeps its BoxCollider
+                target.name = $"Target_{i + 1}";
+                target.transform.SetParent(targetsRoot, false);
+                target.transform.localPosition = new Vector3(k_BoardSize.x * k_TargetXRatios[i], k_TargetSize * 0.5f, targetZ);
+                target.transform.localScale = Vector3.one * k_TargetSize;
+                ConfigureRenderers(target, targetMaterial, ShadowCastingMode.On);
+                var hitbox = target.GetComponent<BoxCollider>();
+                hitbox.size = Vector3.one * k_TargetHitboxRatio;
+                hitbox.center = Vector3.zero;
+                target.AddComponent<TinySiege.Gameplay.DestructibleTarget>();
+            }
             var shadowReceiverSocket = CreateChild(root.transform, "ShadowReceiverSocket", Vector3.zero);
 
             // Shadow receiver: an upward-facing quad on the table plane, rendered only where shadows fall.
