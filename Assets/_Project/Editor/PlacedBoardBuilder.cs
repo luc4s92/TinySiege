@@ -18,21 +18,46 @@ namespace TinySiege.EditorTools
         const string k_PrefabPath = "Assets/_Project/Prefabs/PlacedBoard.prefab";
         const string k_ScenePath = "Assets/Scenes/AR_Main.unity";
         const string k_KenneyDir = "Assets/Models/kenney_castle-kit/Models/FBX format/";
-        const string k_TowerModelPath = k_KenneyDir + "tower-square.fbx";
-        const string k_WallModelPath = k_KenneyDir + "wall.fbx";
         const string k_KenneyMaterialPath = "Assets/_Project/Materials/KenneyColormap.mat";
         const string k_BoardMaterialPath = "Assets/_Project/Materials/BoardBase.mat";
 
         const string k_PreviewPrefabPath = "Assets/_Project/Prefabs/PlacementPreview.prefab";
         const string k_PreviewMaterialPath = "Assets/_Project/Materials/PlacementPreview.mat";
         const string k_ShadowCatcherMaterialPath = "Assets/_Project/Materials/ShadowCatcher.mat";
-        const string k_TargetModelPath = k_KenneyDir + "tower-square-base-color.fbx";
+
+        // Kenney Castle Kit models used by the fortress (file names under k_KenneyDir, without extension).
+        // Kenney walls and gates run along their local Z axis; towers stack bottom to top.
+        const string k_Tower = "tower-square";
+        const string k_Wall = "wall";
+        const string k_TowerBase = "tower-square-base";
+        const string k_TowerBaseColor = "tower-square-base-color";
+        const string k_TowerMidWindows = "tower-square-mid-windows";
+        const string k_TowerTop = "tower-square-top";
+        const string k_TowerTopColor = "tower-square-top-color";
+        const string k_TowerTopRoof = "tower-square-top-roof";
+        const string k_GateWall = "wall-narrow-gate";
+        const string k_Gate = "gate";
+        const string k_Flag = "flag-pennant";
+        const string k_Debris = "rocks-small";
+        static readonly string[] k_FortressModels =
+        {
+            k_Tower, k_Wall, k_TowerBase, k_TowerBaseColor, k_TowerMidWindows, k_TowerTop, k_TowerTopColor,
+            k_TowerTopRoof, k_GateWall, k_Gate, k_Flag, k_Debris
+        };
+
+        // Back row (global, never destroyed): side tower - wall - keep - wall - side tower, one kit tile each.
+        const float k_KeepTile = 0.08f;
 
         // Destructible weak points in front of the fortress, as fractions of the board width.
         static readonly float[] k_TargetXRatios = { -0.3f, -0.1f, 0.1f, 0.3f };
         const float k_TargetSize = 0.04f;
         const float k_TargetFrontGap = 0.005f;
         const float k_TargetHitboxRatio = 0.75f;
+        // Sector half-walls, relative to k_TargetSize: lower and thinner than the tower.
+        const float k_SectorWallHeightRatio = 0.75f;
+        const float k_SectorWallThicknessRatio = 0.5f;
+        // Rubble shown where a destroyed target stood: footprint in meters (height follows the model).
+        const float k_DebrisFootprint = 0.036f;
 
         // Shadow receiver: slightly larger than the board so shadows cast past its edges land on the table.
         const float k_ShadowReceiverScale = 1.4f;
@@ -43,6 +68,8 @@ namespace TinySiege.EditorTools
         static readonly Vector3 k_BoardSize = new Vector3(0.50f, 0.012f, 0.60f);
         const float k_PreviewThickness = 0.002f;
         const float k_PhysicsThickness = 0.04f;
+        // Footprint of the original keep (tower-square at 17 cm, max 85% of the board width). Only used to keep
+        // the target row exactly where it was validated; the visual keep is now built from k_KeepTile.
         const float k_TargetTowerHeight = 0.17f;
         const float k_MaxFortressWidthRatio = 0.85f;
         const float k_FortressDepthRatio = 0.25f;
@@ -51,17 +78,26 @@ namespace TinySiege.EditorTools
         [MenuItem("Tiny Siege/Build PlacedBoard Prefab")]
         static void Build()
         {
-            var towerModel = AssetDatabase.LoadAssetAtPath<GameObject>(k_TowerModelPath);
-            var wallModel = AssetDatabase.LoadAssetAtPath<GameObject>(k_WallModelPath);
             var kenneyMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_KenneyMaterialPath);
             var boardMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_BoardMaterialPath);
             var previewMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_PreviewMaterialPath);
             var shadowCatcherMaterial = AssetDatabase.LoadAssetAtPath<Material>(k_ShadowCatcherMaterialPath);
-            var targetModel = AssetDatabase.LoadAssetAtPath<GameObject>(k_TargetModelPath);
-            if (towerModel == null || wallModel == null || kenneyMaterial == null || boardMaterial == null ||
-                previewMaterial == null || shadowCatcherMaterial == null || targetModel == null)
+            var models = new Dictionary<string, GameObject>();
+            var missing = new List<string>();
+            foreach (string model in k_FortressModels)
             {
-                Debug.LogError("PlacedBoardBuilder: missing Kenney models or board/preview/shadow materials; nothing was built.");
+                var asset = AssetDatabase.LoadAssetAtPath<GameObject>(k_KenneyDir + model + ".fbx");
+                if (asset != null)
+                    models[model] = asset;
+                else
+                    missing.Add(model);
+            }
+
+            if (missing.Count > 0 || kenneyMaterial == null || boardMaterial == null ||
+                previewMaterial == null || shadowCatcherMaterial == null)
+            {
+                Debug.LogError("PlacedBoardBuilder: missing Kenney models (" + string.Join(", ", missing) +
+                               ") or board/preview/shadow materials; nothing was built.");
                 return;
             }
 
@@ -69,7 +105,7 @@ namespace TinySiege.EditorTools
             GameObject prefab;
             try
             {
-                prefab = BuildPrefab(root, towerModel, wallModel, targetModel, kenneyMaterial, boardMaterial, shadowCatcherMaterial);
+                prefab = BuildPrefab(root, models, kenneyMaterial, boardMaterial, shadowCatcherMaterial);
             }
             finally
             {
@@ -122,7 +158,7 @@ namespace TinySiege.EditorTools
             return success ? prefab : null;
         }
 
-        static GameObject BuildPrefab(GameObject root, GameObject towerModel, GameObject wallModel, GameObject targetModel,
+        static GameObject BuildPrefab(GameObject root, Dictionary<string, GameObject> models,
             Material kenneyMaterial, Material boardMaterial, Material shadowCatcherMaterial)
         {
             float top = k_BoardSize.y;
@@ -145,55 +181,145 @@ namespace TinySiege.EditorTools
             box.size = new Vector3(k_BoardSize.x, k_PhysicsThickness, k_BoardSize.z);
             box.center = new Vector3(0f, top - k_PhysicsThickness * 0.5f, 0f);
 
-            // Fortress visuals: one tower flanked by two walls, all sharing one material.
-            var fortressRoot = CreateChild(root.transform, "FortressRoot", new Vector3(0f, top, k_BoardSize.z * k_FortressDepthRatio));
-            Bounds towerBounds = MeasureModel(towerModel);
-            Bounds wallBounds = MeasureModel(wallModel);
-            bool rotateWall = wallBounds.size.z > wallBounds.size.x;
-            float wallLength = rotateWall ? wallBounds.size.z : wallBounds.size.x;
-            float scale = Mathf.Min(
-                k_TargetTowerHeight / Mathf.Max(towerBounds.size.y, 1e-4f),
-                k_BoardSize.x * k_MaxFortressWidthRatio / Mathf.Max(towerBounds.size.x + 2f * wallLength, 1e-4f));
-            float wallOffsetX = (towerBounds.size.x * 0.5f + wallLength * 0.5f) * scale;
-            float wallYaw = rotateWall ? 90f : 0f;
+            var measured = new Dictionary<string, Bounds>();
+            Bounds Measure(string model)
+            {
+                if (!measured.TryGetValue(model, out Bounds b))
+                    measured[model] = b = MeasureModel(models[model]);
+                return b;
+            }
 
-            PlaceModel(towerModel, fortressRoot, "Tower", towerBounds, scale, Vector3.zero, 0f, kenneyMaterial);
-            PlaceModel(wallModel, fortressRoot, "Wall_Left", wallBounds, scale, new Vector3(-wallOffsetX, 0f, 0f), wallYaw, kenneyMaterial);
-            PlaceModel(wallModel, fortressRoot, "Wall_Right", wallBounds, scale, new Vector3(wallOffsetX, 0f, 0f), wallYaw, kenneyMaterial);
+            // Stacks kit pieces bottom to top under a new group; returns the group and the stack height (parent units).
+            Transform PlaceStack(Transform parent, string name, Vector3 position, float unit, out float height, params string[] pieces)
+            {
+                var group = CreateChild(parent, name, position);
+                height = 0f;
+                foreach (string piece in pieces)
+                {
+                    Bounds b = Measure(piece);
+                    PlaceModel(models[piece], group, piece, b, unit, new Vector3(0f, height, 0f), 0f, kenneyMaterial);
+                    height += b.size.y * unit;
+                }
+                return group;
+            }
+
+            // Fortress back row: global decoration (no colliders, never destroyed), one kit tile per piece:
+            // side tower - wall - keep - wall - side tower. Walls run along local Z, so they turn 90 degrees to face -Z.
+            var fortressRoot = CreateChild(root.transform, "FortressRoot", new Vector3(0f, top, k_BoardSize.z * k_FortressDepthRatio));
+            float keepUnit = k_KeepTile / Mathf.Max(Measure(k_Tower).size.x, 1e-4f);
+            var keep = PlaceStack(fortressRoot, "Keep", Vector3.zero, keepUnit, out float keepHeight,
+                k_TowerBase, k_TowerMidWindows, k_TowerTop);
+            PlaceModel(models[k_Flag], keep, "Flag", Measure(k_Flag), keepUnit, new Vector3(0f, keepHeight, 0f), 0f, kenneyMaterial);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                string suffix = side < 0 ? "_Left" : "_Right";
+                PlaceModel(models[k_Wall], fortressRoot, "Wall" + suffix, Measure(k_Wall), keepUnit,
+                    new Vector3(side * k_KeepTile, 0f, 0f), 90f, kenneyMaterial);
+                PlaceStack(fortressRoot, "SideTower" + suffix, new Vector3(side * 2f * k_KeepTile, 0f, 0f), keepUnit, out _,
+                    k_Tower, k_TowerTopRoof);
+            }
 
             // Integration points only; no systems yet.
             var catapultSocket = CreateChild(root.transform, "CatapultSocket", new Vector3(0f, top, k_BoardSize.z * k_CatapultDepthRatio));
             var targetsRoot = CreateChild(root.transform, "TargetsRoot", new Vector3(0f, top, k_BoardSize.z * k_FortressDepthRatio));
 
-            // Targets stand on the board just in front of the fortress (towards the catapult, -Z).
-            float wallDepth = rotateWall ? wallBounds.size.x : wallBounds.size.z;
-            float fortressFrontZ = -0.5f * Mathf.Max(towerBounds.size.z, wallDepth) * scale;
+            // Targets stand on the board in front of the fortress (towards the catapult, -Z). The row stays exactly
+            // where it was validated, computed from the original keep footprint (tower-square at 17 cm + 2 walls).
+            Bounds legacyTower = Measure(k_Tower);
+            Bounds legacyWall = Measure(k_Wall);
+            bool legacyRotateWall = legacyWall.size.z > legacyWall.size.x;
+            float legacyWallLength = legacyRotateWall ? legacyWall.size.z : legacyWall.size.x;
+            float legacyScale = Mathf.Min(
+                k_TargetTowerHeight / Mathf.Max(legacyTower.size.y, 1e-4f),
+                k_BoardSize.x * k_MaxFortressWidthRatio / Mathf.Max(legacyTower.size.x + 2f * legacyWallLength, 1e-4f));
+            float legacyWallDepth = legacyRotateWall ? legacyWall.size.x : legacyWall.size.z;
+            float fortressFrontZ = -0.5f * Mathf.Max(legacyTower.size.z, legacyWallDepth) * legacyScale;
             float targetZ = fortressFrontZ - k_TargetFrontGap - k_TargetSize * 0.5f;
-            // Visual scale is relative to the target root, which is already scaled to k_TargetSize:
-            // 1 / largest dimension makes the model's largest side span the whole k_TargetSize cube.
-            Bounds targetBounds = MeasureModel(targetModel);
-            float targetVisualScale = 1f / Mathf.Max(targetBounds.size.x, targetBounds.size.y, targetBounds.size.z, 1e-4f);
-            Debug.Log($"PlacedBoardBuilder: target visual {targetBounds.size * targetVisualScale * k_TargetSize} m " +
-                      $"(hitbox {k_TargetSize * k_TargetHitboxRatio:0.###} m cube).");
+
+            // Each target is a fortress sector: its tower (aligned with the hitbox) plus its walls, all under
+            // Target_N/Visual so the whole sector vanishes with the target.
+            Bounds targetBounds = Measure(k_TowerBaseColor);
+            Bounds wallBounds = Measure(k_Wall);
+            Bounds gateWallBounds = Measure(k_GateWall);
+            Bounds debrisBounds = Measure(k_Debris);
+            // Meters per model unit for the sector pieces: the tower base's largest side spans k_TargetSize.
+            float sectorUnit = k_TargetSize / Mathf.Max(targetBounds.size.x, targetBounds.size.y, targetBounds.size.z, 1e-4f);
+            float towerWidth = targetBounds.size.x * sectorUnit;
+            float towerDepth = targetBounds.size.z * sectorUnit;
+            float gatehouseLength = gateWallBounds.size.z * sectorUnit; // runs along local Z, turned 90 degrees
+            int gateGap = k_TargetXRatios.Length / 2 - 1; // the gap between the two central targets
+            float debrisScale = k_DebrisFootprint / Mathf.Max(debrisBounds.size.x, debrisBounds.size.z, 1e-4f);
+            // Outer sectors close the courtyard with a wall back to the side towers.
+            float backRowFrontZ = -0.5f * k_KeepTile;
+            float backWallLength = Mathf.Max(0f, backRowFrontZ - (targetZ + towerDepth * 0.5f));
+
+            float HalfWallLength(int gap)
+            {
+                float width = k_BoardSize.x * (k_TargetXRatios[gap + 1] - k_TargetXRatios[gap]) - towerWidth;
+                if (gap == gateGap)
+                    width -= gatehouseLength;
+                return Mathf.Max(0f, width * 0.5f);
+            }
+
+            Debug.Log($"PlacedBoardBuilder: keep {keepHeight:0.###} m tall, back row {5f * k_KeepTile:0.##} m wide; " +
+                      $"sector tower {targetBounds.size * sectorUnit} m, hitbox {k_TargetSize * k_TargetHitboxRatio:0.###} m cube; " +
+                      $"half-wall {HalfWallLength(0):0.###} m (next to gate {HalfWallLength(gateGap):0.###} m), " +
+                      $"back wall {backWallLength:0.###} m, gatehouse {gateWallBounds.size * sectorUnit} m, " +
+                      $"debris {debrisBounds.size * debrisScale} m; target row z {targetZ:0.####} m.");
+
+            int lastTarget = k_TargetXRatios.Length - 1;
             for (int i = 0; i < k_TargetXRatios.Length; i++)
             {
+                float targetX = k_BoardSize.x * k_TargetXRatios[i];
                 var target = GameObject.CreatePrimitive(PrimitiveType.Cube); // keeps its BoxCollider
                 target.name = $"Target_{i + 1}";
                 target.transform.SetParent(targetsRoot, false);
-                target.transform.localPosition = new Vector3(k_BoardSize.x * k_TargetXRatios[i], k_TargetSize * 0.5f, targetZ);
+                target.transform.localPosition = new Vector3(targetX, k_TargetSize * 0.5f, targetZ);
                 target.transform.localScale = Vector3.one * k_TargetSize;
                 var hitbox = target.GetComponent<BoxCollider>();
                 hitbox.size = Vector3.one * k_TargetHitboxRatio;
                 hitbox.center = Vector3.zero;
-                target.AddComponent<TinySiege.Gameplay.DestructibleTarget>();
+                var destructible = target.AddComponent<TinySiege.Gameplay.DestructibleTarget>();
 
-                // Swap the placeholder cube's rendering for a Kenney model; the root keeps collider and logic.
+                // Swap the placeholder cube's rendering for Kenney models; the root keeps collider and logic.
                 Object.DestroyImmediate(target.GetComponent<MeshRenderer>());
                 Object.DestroyImmediate(target.GetComponent<MeshFilter>());
-                // Bottom-center of the unit cube in the target's local space, i.e. the board surface.
-                PlaceModel(targetModel, target.transform, "Visual", targetBounds, targetVisualScale,
-                    new Vector3(0f, -0.5f, 0f), 0f, kenneyMaterial);
+                // Sector group at the bottom face of the unit cube (the board surface), in target units.
+                var visual = CreateChild(target.transform, "Visual", new Vector3(0f, -0.5f, 0f));
+                bool outer = i == 0 || i == lastTarget;
+                PlaceStack(visual, "Tower", Vector3.zero, sectorUnit / k_TargetSize, out _,
+                    k_TowerBaseColor, outer ? k_TowerTopColor : k_TowerTop);
+                if (i > 0)
+                {
+                    float length = HalfWallLength(i - 1);
+                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Left",
+                        new Vector3(-(towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial);
+                }
+                if (i < lastTarget)
+                {
+                    float length = HalfWallLength(i);
+                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Right",
+                        new Vector3((towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial);
+                }
+                if (outer)
+                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Back",
+                        new Vector3(0f, 0f, (towerDepth + backWallLength) * 0.5f), backWallLength, false, kenneyMaterial);
+
+                // Rubble: a sibling of the target (which deactivates itself), hidden until the target is destroyed.
+                var debrisRoot = CreateChild(targetsRoot, $"Debris_{i + 1}", new Vector3(targetX, 0f, targetZ));
+                var rocks = PlaceModel(models[k_Debris], debrisRoot, "Rocks", debrisBounds, debrisScale, Vector3.zero, 0f, kenneyMaterial);
+                rocks.SetActive(false);
+                var debris = new SerializedObject(debrisRoot.gameObject.AddComponent<TinySiege.Gameplay.TargetDebris>());
+                debris.FindProperty("target").objectReferenceValue = destructible;
+                debris.FindProperty("debris").objectReferenceValue = rocks;
+                debris.ApplyModifiedPropertiesWithoutUndo();
             }
+
+            // Gatehouse: global decoration between the two central targets. The gate fits the wall's 66-unit opening.
+            float gateX = k_BoardSize.x * 0.5f * (k_TargetXRatios[gateGap] + k_TargetXRatios[gateGap + 1]);
+            var gatehouse = CreateChild(targetsRoot, "Gatehouse", new Vector3(gateX, 0f, targetZ));
+            PlaceModel(models[k_GateWall], gatehouse, "GateWall", gateWallBounds, sectorUnit, Vector3.zero, 90f, kenneyMaterial);
+            PlaceModel(models[k_Gate], gatehouse, "Gate", Measure(k_Gate), sectorUnit, Vector3.zero, 90f, kenneyMaterial);
             var shadowReceiverSocket = CreateChild(root.transform, "ShadowReceiverSocket", Vector3.zero);
 
             // Shadow receiver: an upward-facing quad on the table plane, rendered only where shadows fall.
@@ -217,7 +343,7 @@ namespace TinySiege.EditorTools
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, k_PrefabPath, out bool success);
-            Debug.Log($"PlacedBoardBuilder: saved {k_PrefabPath} (kit scale {scale:0.###}, tower height {towerBounds.size.y * scale:0.###} m).");
+            Debug.Log($"PlacedBoardBuilder: saved {k_PrefabPath} (kit scale {keepUnit:0.###}, tower height {keepHeight:0.###} m).");
             return success ? prefab : null;
         }
 
@@ -229,7 +355,12 @@ namespace TinySiege.EditorTools
             return child;
         }
 
-        internal static void PlaceModel(GameObject model, Transform parent, string name, Bounds unitBounds, float scale,
+        internal static GameObject PlaceModel(GameObject model, Transform parent, string name, Bounds unitBounds, float scale,
+            Vector3 bottomCenter, float yaw, Material material)
+            => PlaceModel(model, parent, name, unitBounds, Vector3.one * scale, bottomCenter, yaw, material);
+
+        /// <summary>Non-uniform variant: <paramref name="scale"/> is expressed in the model's own axes.</summary>
+        internal static GameObject PlaceModel(GameObject model, Transform parent, string name, Bounds unitBounds, Vector3 scale,
             Vector3 bottomCenter, float yaw, Material material)
         {
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(model, parent);
@@ -237,12 +368,33 @@ namespace TinySiege.EditorTools
             var rotation = Quaternion.Euler(0f, yaw, 0f);
             Vector3 pivotToBottomCenter = new Vector3(unitBounds.center.x, unitBounds.min.y, unitBounds.center.z);
             instance.transform.localRotation = rotation;
-            instance.transform.localScale = Vector3.one * scale;
-            instance.transform.localPosition = bottomCenter - rotation * (pivotToBottomCenter * scale);
+            instance.transform.localScale = scale;
+            instance.transform.localPosition = bottomCenter - rotation * Vector3.Scale(pivotToBottomCenter, scale);
             ConfigureRenderers(instance, material, ShadowCastingMode.On);
 
             foreach (var collider in instance.GetComponentsInChildren<Collider>(true))
                 Object.DestroyImmediate(collider);
+            return instance;
+        }
+
+        /// <summary>
+        /// Low, thin wall segment of a fortress sector. Kenney walls run along their local Z axis;
+        /// <paramref name="alongX"/> turns the segment 90 degrees so it runs along the target row.
+        /// <paramref name="visual"/> is in target units (1 = k_TargetSize); <paramref name="center"/> (bottom center,
+        /// relative to the target) and <paramref name="length"/> are in meters.
+        /// </summary>
+        static void PlaceSectorWall(GameObject wallModel, Bounds wallBounds, Transform visual, string name,
+            Vector3 center, float length, bool alongX, Material material)
+        {
+            if (length <= 1e-4f)
+                return;
+
+            // Length fills the gap; height and thickness stay below the tower so the tower reads as the target.
+            var scale = new Vector3(
+                k_SectorWallThicknessRatio / Mathf.Max(wallBounds.size.x, 1e-4f),
+                k_SectorWallHeightRatio / Mathf.Max(wallBounds.size.y, 1e-4f),
+                length / k_TargetSize / Mathf.Max(wallBounds.size.z, 1e-4f));
+            PlaceModel(wallModel, visual, name, wallBounds, scale, center / k_TargetSize, alongX ? 90f : 0f, material);
         }
 
         /// <summary>Mesh bounds of a model in its own root space, at unit scale.</summary>
@@ -293,12 +445,17 @@ namespace TinySiege.EditorTools
 
         static void LogRenderStats(GameObject prefab)
         {
-            int renderers = 0, triangles = 0, colliders = prefab.GetComponentsInChildren<Collider>(true).Length;
+            int renderers = 0, hiddenRenderers = 0, triangles = 0;
+            var colliders = prefab.GetComponentsInChildren<Collider>(true);
+            int targets = prefab.GetComponentsInChildren<TinySiege.Gameplay.DestructibleTarget>(true).Length;
             var meshes = new HashSet<Mesh>();
             var materials = new HashSet<Material>();
             foreach (var renderer in prefab.GetComponentsInChildren<MeshRenderer>(true))
             {
                 renderers++;
+                // Hidden until needed (e.g. debris); not rendered at start.
+                if (!renderer.gameObject.activeInHierarchy)
+                    hiddenRenderers++;
                 foreach (var m in renderer.sharedMaterials)
                     if (m != null) materials.Add(m);
                 var filter = renderer.GetComponent<MeshFilter>();
@@ -309,7 +466,29 @@ namespace TinySiege.EditorTools
                         triangles += (int)filter.sharedMesh.GetIndexCount(s) / 3;
                 }
             }
-            Debug.Log($"PlacedBoardBuilder: {renderers} renderers, {meshes.Count} unique meshes, {materials.Count} materials, {triangles} triangles, {colliders} collider(s).");
+
+            // Kenney model instances per source file.
+            var modelUse = new SortedDictionary<string, int>();
+            foreach (var t in prefab.GetComponentsInChildren<Transform>(true))
+            {
+                if (!PrefabUtility.IsAnyPrefabInstanceRoot(t.gameObject))
+                    continue;
+                var source = PrefabUtility.GetCorrespondingObjectFromOriginalSource(t.gameObject);
+                string key = source != null ? source.name : t.name;
+                modelUse[key] = modelUse.TryGetValue(key, out int n) ? n + 1 : 1;
+            }
+
+            var colliderNames = new List<string>();
+            foreach (var c in colliders)
+                colliderNames.Add(c.name);
+
+            Debug.Log($"PlacedBoardBuilder: {renderers} renderers ({hiddenRenderers} hidden at start), {meshes.Count} unique meshes, " +
+                      $"{materials.Count} materials, {triangles} triangles, {colliders.Length} collider(s) [{string.Join(", ", colliderNames)}], " +
+                      $"{targets} DestructibleTarget(s).");
+            var uses = new List<string>();
+            foreach (var pair in modelUse)
+                uses.Add($"{pair.Key} x{pair.Value}");
+            Debug.Log("PlacedBoardBuilder: models used: " + string.Join(", ", uses) + ".");
         }
 
         static void AssignToScene(GameObject prefab, GameObject preview)
