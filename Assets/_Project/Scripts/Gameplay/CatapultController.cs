@@ -66,6 +66,15 @@ namespace TinySiege.Gameplay
         /// <summary>Raised whenever <see cref="Charge01"/> changes.</summary>
         public event Action<float> ChargeChanged;
 
+        /// <summary>World-space horizontal launch direction while dragging (the launch point's forward when not pulled).</summary>
+        public Vector3 AimDirection { get; private set; }
+
+        /// <summary>Raised with true when a drag starts and false when it is released or cancelled.</summary>
+        public event Action<bool> AimingChanged;
+
+        /// <summary>Raised while dragging whenever <see cref="AimDirection"/> changes.</summary>
+        public event Action<Vector3> AimDirectionChanged;
+
         /// <summary>Camera used to read the pointer. Defaults to <see cref="Camera.main"/>.</summary>
         public void SetCamera(Camera cameraToUse) => viewCamera = cameraToUse;
 
@@ -138,6 +147,8 @@ namespace TinySiege.Gameplay
             loaded.Body.isKinematic = true;
             state = State.Dragging;
             LogPhysics("drag started, isKinematic = true");
+            AimingChanged?.Invoke(true);
+            SetAimDirection(launchPoint.forward);
         }
 
         void UpdateDrag(Camera cam, Vector2 screenPosition)
@@ -167,6 +178,8 @@ namespace TinySiege.Gameplay
             pull = launchPoint.TransformDirection(local);
             loaded.transform.position = launchPoint.position + pull;
             SetCharge(magnitude / maxPullDistance);
+            // Same horizontal direction Release() launches along.
+            SetAimDirection(pull.sqrMagnitude > 1e-10f ? -pull.normalized : launchPoint.forward);
         }
 
         void Release()
@@ -198,6 +211,7 @@ namespace TinySiege.Gameplay
             state = State.InFlight;
             LogPhysics($"launched, isKinematic = false, speed {speed:0.00} m/s, charge {Charge01:0.00}");
             SetCharge(0f);
+            AimingChanged?.Invoke(false);
             ProjectileLaunched?.Invoke(projectile);
         }
 
@@ -213,6 +227,16 @@ namespace TinySiege.Gameplay
             SetCharge(0f);
             state = State.Ready;
             LogPhysics("drag cancelled, isKinematic = true");
+            AimingChanged?.Invoke(false);
+        }
+
+        void SetAimDirection(Vector3 direction)
+        {
+            if (direction == AimDirection)
+                return;
+
+            AimDirection = direction;
+            AimDirectionChanged?.Invoke(direction);
         }
 
         void OnShotResolved(Projectile projectile)
