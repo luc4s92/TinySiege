@@ -1,0 +1,8 @@
+# Unity serialized YAML: Unity writes empty values as "key: " (trailing space).
+# Only blank-at-eol is disabled; space-before-tab and blank-at-eof stay active.
+# tab-in-indent is added because tabs are invalid YAML indentation.
+*.unity   whitespace=-blank-at-eol,tab-in-indent
+*.prefab  whitespace=-blank-at-eol,tab-in-indent
+*.asset   whitespace=-blank-at-eol,tab-in-indent
+*.mat     whitespace=-blank-at-eol,tab-in-indent
+*.meta    whitespace=-blank-at-eol,tab-in-indent
