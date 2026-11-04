@@ -217,7 +217,7 @@ namespace TinySiege.EditorTools
             return child;
         }
 
-        static void PlaceModel(GameObject model, Transform parent, string name, Bounds unitBounds, float scale,
+        internal static void PlaceModel(GameObject model, Transform parent, string name, Bounds unitBounds, float scale,
             Vector3 bottomCenter, float yaw, Material material)
         {
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(model, parent);
@@ -234,7 +234,7 @@ namespace TinySiege.EditorTools
         }
 
         /// <summary>Mesh bounds of a model in its own root space, at unit scale.</summary>
-        static Bounds MeasureModel(GameObject model)
+        internal static Bounds MeasureModel(GameObject model)
         {
             var temp = (GameObject)PrefabUtility.InstantiatePrefab(model);
             try
