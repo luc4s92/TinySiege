@@ -1423,7 +1423,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9bb92925c37e4c248400d9b1933afbaa, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  startingAmmo: 5
+  startingAmmo: 15
 --- !u!1 &635611966106407552
 GameObject:
   m_ObjectHideFlags: 0
@@ -1643,7 +1643,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 1
     m_LineSpacing: 1
-  m_Text: Ammo: 5
+  m_Text: Ammo: 15
 --- !u!1 &697755374261552256
 GameObject:
   m_ObjectHideFlags: 0

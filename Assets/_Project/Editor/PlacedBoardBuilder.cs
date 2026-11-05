@@ -52,7 +52,10 @@ namespace TinySiege.EditorTools
         static readonly float[] k_TargetXRatios = { -0.3f, -0.1f, 0.1f, 0.3f };
         const float k_TargetSize = 0.04f;
         const float k_TargetFrontGap = 0.005f;
+        // Hitbox footprint relative to the sector tower; its height follows the tower stack (board to top).
         const float k_TargetHitboxRatio = 0.75f;
+        // Valid hits per sector: hit 1 drops the tower top, hit 2 the walls, hit 3 destroys the rest.
+        const int k_SectorHits = 3;
         // Sector half-walls, relative to k_TargetSize: lower and thinner than the tower.
         const float k_SectorWallHeightRatio = 0.75f;
         const float k_SectorWallThicknessRatio = 0.5f;
@@ -262,7 +265,8 @@ namespace TinySiege.EditorTools
             }
 
             Debug.Log($"PlacedBoardBuilder: keep {keepHeight:0.###} m tall, back row {5f * k_KeepTile:0.##} m wide; " +
-                      $"sector tower {targetBounds.size * sectorUnit} m, hitbox {k_TargetSize * k_TargetHitboxRatio:0.###} m cube; " +
+                      $"sector tower {targetBounds.size * sectorUnit} m, hitbox {k_TargetSize * k_TargetHitboxRatio:0.###} m wide " +
+                      $"(height = tower stack), {k_SectorHits} hits per sector; " +
                       $"half-wall {HalfWallLength(0):0.###} m (next to gate {HalfWallLength(gateGap):0.###} m), " +
                       $"back wall {backWallLength:0.###} m, gatehouse {gateWallBounds.size * sectorUnit} m, " +
                       $"debris {debrisBounds.size * debrisScale} m; target row z {targetZ:0.####} m.");
@@ -276,10 +280,10 @@ namespace TinySiege.EditorTools
                 target.transform.SetParent(targetsRoot, false);
                 target.transform.localPosition = new Vector3(targetX, k_TargetSize * 0.5f, targetZ);
                 target.transform.localScale = Vector3.one * k_TargetSize;
-                var hitbox = target.GetComponent<BoxCollider>();
-                hitbox.size = Vector3.one * k_TargetHitboxRatio;
-                hitbox.center = Vector3.zero;
                 var destructible = target.AddComponent<TinySiege.Gameplay.DestructibleTarget>();
+                var destructibleSettings = new SerializedObject(destructible);
+                destructibleSettings.FindProperty("hitsToDestroy").intValue = k_SectorHits;
+                destructibleSettings.ApplyModifiedPropertiesWithoutUndo();
 
                 // Swap the placeholder cube's rendering for Kenney models; the root keeps collider and logic.
                 Object.DestroyImmediate(target.GetComponent<MeshRenderer>());
@@ -287,23 +291,42 @@ namespace TinySiege.EditorTools
                 // Sector group at the bottom face of the unit cube (the board surface), in target units.
                 var visual = CreateChild(target.transform, "Visual", new Vector3(0f, -0.5f, 0f));
                 bool outer = i == 0 || i == lastTarget;
-                PlaceStack(visual, "Tower", Vector3.zero, sectorUnit / k_TargetSize, out _,
-                    k_TowerBaseColor, outer ? k_TowerTopColor : k_TowerTop);
+                string towerTop = outer ? k_TowerTopColor : k_TowerTop;
+                var tower = PlaceStack(visual, "Tower", Vector3.zero, sectorUnit / k_TargetSize, out float towerHeight,
+                    k_TowerBaseColor, towerTop);
+
+                // Hitbox: the tower's footprint (not the neighbouring walls), from the board to the tower top.
+                var hitbox = target.GetComponent<BoxCollider>();
+                hitbox.size = new Vector3(k_TargetHitboxRatio, towerHeight, k_TargetHitboxRatio);
+                hitbox.center = new Vector3(0f, towerHeight * 0.5f - 0.5f, 0f);
+
+                var walls = new List<GameObject>();
                 if (i > 0)
                 {
                     float length = HalfWallLength(i - 1);
-                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Left",
-                        new Vector3(-(towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial);
+                    walls.Add(PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Left",
+                        new Vector3(-(towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial));
                 }
                 if (i < lastTarget)
                 {
                     float length = HalfWallLength(i);
-                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Right",
-                        new Vector3((towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial);
+                    walls.Add(PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Right",
+                        new Vector3((towerWidth + length) * 0.5f, 0f, 0f), length, true, kenneyMaterial));
                 }
                 if (outer)
-                    PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Back",
-                        new Vector3(0f, 0f, (towerDepth + backWallLength) * 0.5f), backWallLength, false, kenneyMaterial);
+                    walls.Add(PlaceSectorWall(models[k_Wall], wallBounds, visual, "Wall_Back",
+                        new Vector3(0f, 0f, (towerDepth + backWallLength) * 0.5f), backWallLength, false, kenneyMaterial));
+                walls.RemoveAll(wall => wall == null);
+
+                // Damage stages (the destroying hit needs none: the target hides itself, Debris_N shows the rubble).
+                var damage = new SerializedObject(target.AddComponent<TinySiege.Gameplay.FortressSectorDamage>());
+                SerializedProperty stages = damage.FindProperty("stages");
+                stages.arraySize = k_SectorHits - 1;
+                SetStagePieces(stages.GetArrayElementAtIndex(0), tower.Find(towerTop).gameObject); // stage 1: tower top
+                SetStagePieces(stages.GetArrayElementAtIndex(1), walls.ToArray());                   // stage 2: sector walls
+                damage.ApplyModifiedPropertiesWithoutUndo();
+                Debug.Log($"PlacedBoardBuilder: {target.name} hitbox {hitbox.size.y * k_TargetSize:0.###} m tall, stage 1 hides {towerTop}, " +
+                    $"stage 2 hides {walls.Count} wall(s).");
 
                 // Rubble: a sibling of the target (which deactivates itself), hidden until the target is destroyed.
                 var debrisRoot = CreateChild(targetsRoot, $"Debris_{i + 1}", new Vector3(targetX, 0f, targetZ));
@@ -383,18 +406,27 @@ namespace TinySiege.EditorTools
         /// <paramref name="visual"/> is in target units (1 = k_TargetSize); <paramref name="center"/> (bottom center,
         /// relative to the target) and <paramref name="length"/> are in meters.
         /// </summary>
-        static void PlaceSectorWall(GameObject wallModel, Bounds wallBounds, Transform visual, string name,
+        static GameObject PlaceSectorWall(GameObject wallModel, Bounds wallBounds, Transform visual, string name,
             Vector3 center, float length, bool alongX, Material material)
         {
             if (length <= 1e-4f)
-                return;
+                return null;
 
             // Length fills the gap; height and thickness stay below the tower so the tower reads as the target.
             var scale = new Vector3(
                 k_SectorWallThicknessRatio / Mathf.Max(wallBounds.size.x, 1e-4f),
                 k_SectorWallHeightRatio / Mathf.Max(wallBounds.size.y, 1e-4f),
                 length / k_TargetSize / Mathf.Max(wallBounds.size.z, 1e-4f));
-            PlaceModel(wallModel, visual, name, wallBounds, scale, center / k_TargetSize, alongX ? 90f : 0f, material);
+            return PlaceModel(wallModel, visual, name, wallBounds, scale, center / k_TargetSize, alongX ? 90f : 0f, material);
+        }
+
+        /// <summary>Fills one FortressSectorDamage stage (its <c>hide</c> array) with the given pieces.</summary>
+        static void SetStagePieces(SerializedProperty stage, params GameObject[] pieces)
+        {
+            SerializedProperty hide = stage.FindPropertyRelative("hide");
+            hide.arraySize = pieces.Length;
+            for (int i = 0; i < pieces.Length; i++)
+                hide.GetArrayElementAtIndex(i).objectReferenceValue = pieces[i];
         }
 
         /// <summary>Mesh bounds of a model in its own root space, at unit scale.</summary>

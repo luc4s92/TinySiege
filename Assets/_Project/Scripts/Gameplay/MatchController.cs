@@ -23,7 +23,8 @@ namespace TinySiege.Gameplay
     [DisallowMultipleComponent]
     public sealed class MatchController : MonoBehaviour
     {
-        [SerializeField, Min(1)] int startingAmmo = 5;
+        // 4 sectors x 3 hits = 12 minimum shots, plus 3 spare.
+        [SerializeField, Min(1)] int startingAmmo = 15;
 
         readonly List<DestructibleTarget> targets = new List<DestructibleTarget>();
         BoardGameplaySpawner spawner;
