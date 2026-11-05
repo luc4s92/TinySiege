@@ -13,6 +13,7 @@ namespace TinySiege.Board
         [SerializeField] Transform boardRoot;
         [SerializeField] BoxCollider physicsSurface;
         [SerializeField] Transform fortressRoot;
+        [SerializeField] GameObject fortressFinalDebris;
         [SerializeField] Transform catapultSocket;
         [SerializeField] Transform targetsRoot;
         [SerializeField] Transform shadowReceiverSocket;
@@ -23,8 +24,11 @@ namespace TinySiege.Board
         /// <summary>Gameplay collision surface, independent from the AR plane and from the visuals.</summary>
         public BoxCollider PhysicsSurface => physicsSurface;
 
-        /// <summary>Parent of the fortress visuals.</summary>
+        /// <summary>Parent of the global fortress visuals (back row and gatehouse); hidden when the match is won.</summary>
         public Transform FortressRoot => fortressRoot;
+
+        /// <summary>Ruins of the whole fortress, inactive until the match is won (visual only, no colliders).</summary>
+        public GameObject FortressFinalDebris => fortressFinalDebris;
 
         /// <summary>Where the catapult will be spawned; its forward axis faces the fortress.</summary>
         public Transform CatapultSocket => catapultSocket;
