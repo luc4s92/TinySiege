@@ -39,10 +39,36 @@ namespace TinySiege.EditorTools
         const string k_Gate = "gate";
         const string k_Flag = "flag-pennant";
         const string k_Debris = "rocks-small";
+        const string k_DebrisLarge = "rocks-large";
         static readonly string[] k_FortressModels =
         {
             k_Tower, k_Wall, k_TowerBase, k_TowerBaseColor, k_TowerMidWindows, k_TowerTop, k_TowerTopColor,
-            k_TowerTopRoof, k_GateWall, k_Gate, k_Flag, k_Debris
+            k_TowerTopRoof, k_GateWall, k_Gate, k_Flag, k_Debris, k_DebrisLarge
+        };
+
+        // Victory ruins (FortressFinalDebris), shown when the match is won in place of the back row and gatehouse.
+        // Relative to FortressRoot's origin, in meters: x, z, largest footprint side, yaw. The back row spans
+        // x -0.2..0.2 and z -0.04..0.04; the gatehouse stands at the target row (z = targetZ, added at build time).
+        static readonly (string model, float x, float z, float footprint, float yaw)[] k_FinalRubble =
+        {
+            (k_DebrisLarge, 0f, 0f, 0.12f, 15f),
+            (k_DebrisLarge, -0.16f, 0.005f, 0.085f, 140f),
+            (k_DebrisLarge, 0.16f, -0.005f, 0.085f, 250f),
+            (k_DebrisLarge, -0.085f, 0.012f, 0.07f, 70f),
+            (k_DebrisLarge, 0.085f, -0.01f, 0.07f, 200f),
+            (k_Debris, -0.04f, -0.035f, 0.05f, 30f),
+            (k_Debris, 0.045f, 0.032f, 0.045f, 110f),
+            (k_Debris, -0.125f, -0.03f, 0.04f, 300f),
+            (k_Debris, 0.125f, 0.03f, 0.04f, 160f),
+            (k_Debris, -0.2f, 0.02f, 0.035f, 45f),
+            (k_Debris, 0.2f, -0.02f, 0.035f, 220f),
+        };
+        // Rubble left where the gatehouse stood (x = gateX, z = targetZ).
+        const float k_GateRubbleFootprint = 0.05f;
+        // Broken tower stumps under the rubble: x, footprint width, height (meters).
+        static readonly (float x, float width, float height)[] k_FinalStumps =
+        {
+            (0f, 0.07f, 0.025f), (-0.16f, 0.06f, 0.02f), (0.16f, 0.06f, 0.02f),
         };
 
         // Back row (global, never destroyed): side tower - wall - keep - wall - side tower, one kit tile each.
@@ -324,6 +350,7 @@ namespace TinySiege.EditorTools
                 stages.arraySize = k_SectorHits - 1;
                 SetStagePieces(stages.GetArrayElementAtIndex(0), tower.Find(towerTop).gameObject); // stage 1: tower top
                 SetStagePieces(stages.GetArrayElementAtIndex(1), walls.ToArray());                   // stage 2: sector walls
+                damage.FindProperty("punchVisual").objectReferenceValue = visual;                      // hit feedback
                 damage.ApplyModifiedPropertiesWithoutUndo();
                 Debug.Log($"PlacedBoardBuilder: {target.name} hitbox {hitbox.size.y * k_TargetSize:0.###} m tall, stage 1 hides {towerTop}, " +
                     $"stage 2 hides {walls.Count} wall(s).");
@@ -339,10 +366,35 @@ namespace TinySiege.EditorTools
             }
 
             // Gatehouse: global decoration between the two central targets. The gate fits the wall's 66-unit opening.
+            // It lives under FortressRoot (same origin as TargetsRoot) so it collapses with the back row on victory.
             float gateX = k_BoardSize.x * 0.5f * (k_TargetXRatios[gateGap] + k_TargetXRatios[gateGap + 1]);
-            var gatehouse = CreateChild(targetsRoot, "Gatehouse", new Vector3(gateX, 0f, targetZ));
+            var gatehouse = CreateChild(fortressRoot, "Gatehouse", new Vector3(gateX, 0f, targetZ));
             PlaceModel(models[k_GateWall], gatehouse, "GateWall", gateWallBounds, sectorUnit, Vector3.zero, 90f, kenneyMaterial);
             PlaceModel(models[k_Gate], gatehouse, "Gate", Measure(k_Gate), sectorUnit, Vector3.zero, 90f, kenneyMaterial);
+
+            // Victory ruins: a big rubble heap over the back row and the gatehouse, hidden until the match is won.
+            var finalDebris = CreateChild(root.transform, "FortressFinalDebris", fortressRoot.localPosition);
+            Bounds stumpBounds = Measure(k_TowerBase);
+            for (int s = 0; s < k_FinalStumps.Length; s++)
+            {
+                var stump = k_FinalStumps[s];
+                var stumpScale = new Vector3(stump.width / stumpBounds.size.x, stump.height / stumpBounds.size.y,
+                    stump.width / stumpBounds.size.z);
+                PlaceModel(models[k_TowerBase], finalDebris, $"Stump_{s + 1}", stumpBounds, stumpScale,
+                    new Vector3(stump.x, 0f, 0f), 0f, kenneyMaterial);
+            }
+            for (int r = 0; r < k_FinalRubble.Length; r++)
+            {
+                var rubble = k_FinalRubble[r];
+                Bounds b = Measure(rubble.model);
+                PlaceModel(models[rubble.model], finalDebris, $"Rubble_{r + 1}", b,
+                    rubble.footprint / Mathf.Max(b.size.x, b.size.z, 1e-4f), new Vector3(rubble.x, 0f, rubble.z), rubble.yaw, kenneyMaterial);
+            }
+            Bounds gateRubble = Measure(k_Debris);
+            PlaceModel(models[k_Debris], finalDebris, "Rubble_Gate", gateRubble,
+                k_GateRubbleFootprint / Mathf.Max(gateRubble.size.x, gateRubble.size.z, 1e-4f),
+                new Vector3(gateX, 0f, targetZ), 300f, kenneyMaterial);
+            finalDebris.gameObject.SetActive(false);
             var shadowReceiverSocket = CreateChild(root.transform, "ShadowReceiverSocket", Vector3.zero);
 
             // Shadow receiver: an upward-facing quad on the table plane, rendered only where shadows fall.
@@ -360,6 +412,7 @@ namespace TinySiege.EditorTools
             serialized.FindProperty("boardRoot").objectReferenceValue = boardRoot;
             serialized.FindProperty("physicsSurface").objectReferenceValue = box;
             serialized.FindProperty("fortressRoot").objectReferenceValue = fortressRoot;
+            serialized.FindProperty("fortressFinalDebris").objectReferenceValue = finalDebris.gameObject;
             serialized.FindProperty("catapultSocket").objectReferenceValue = catapultSocket;
             serialized.FindProperty("targetsRoot").objectReferenceValue = targetsRoot;
             serialized.FindProperty("shadowReceiverSocket").objectReferenceValue = shadowReceiverSocket;
@@ -571,6 +624,17 @@ namespace TinySiege.EditorTools
                 textSerialized.FindProperty("m_Text").stringValue = instruction.text.Replace("el cubo", "el tablero");
                 textSerialized.ApplyModifiedProperties();
                 changed = true;
+            }
+
+            // Victory collapse: visual companion of the MatchController (it owns no match state).
+            var match = Object.FindAnyObjectByType<TinySiege.Gameplay.MatchController>(FindObjectsInactive.Include);
+            if (match == null)
+                Debug.LogWarning("PlacedBoardBuilder: no MatchController in " + k_ScenePath + "; victory collapse not added.");
+            else if (match.GetComponent<TinySiege.Gameplay.FortressVictoryCollapse>() == null)
+            {
+                match.gameObject.AddComponent<TinySiege.Gameplay.FortressVictoryCollapse>();
+                changed = true;
+                Debug.Log($"PlacedBoardBuilder: added FortressVictoryCollapse to {match.name}.");
             }
 
             if (!changed)

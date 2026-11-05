@@ -1374,6 +1374,7 @@ GameObject:
   - component: {fileID: 1315249526330943336}
   - component: {fileID: 5786999761925215857}
   - component: {fileID: 4410527390158823651}
+  - component: {fileID: 8852380287587554199}
   m_Layer: 0
   m_Name: Gameplay
   m_TagString: Untagged
@@ -1381,6 +1382,18 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &8852380287587554199
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8852380287587554198}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e6369921c28b469faef85f5c05d9b6ce, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::TinySiege.Gameplay.FortressVictoryCollapse
 --- !u!4 &1315249526330943336
 Transform:
   m_ObjectHideFlags: 0
